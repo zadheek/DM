@@ -1,0 +1,136 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// User model with role-based access
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  phone         String?
+  address       String?
+  role          String    @default("USER") // ADMIN, USER, VOLUNTEER
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  reports       EmergencyReport[]
+  donations     Donation[]
+  
+  @@index([email])
+}
+
+// Role enumeration - Stored as String in SQLite
+// enum Role {
+//   ADMIN
+//   USER
+//   VOLUNTEER
+// }
+
+// Disaster model for tracking disaster events
+model Disaster {
+  id              String    @id @default(cuid())
+  type            String    // flood, cyclone, earthquake, tsunami, etc.
+  severity        String    // low, medium, high, critical
+  location        String
+  description     String?
+  status          String    @default("active") // active, resolved, monitoring
+  affectedAreas   String    // JSON string of affected districts/areas
+  startDate       DateTime
+  endDate         DateTime?
+  createdAt       DateTime  @default(now())
+  
+  reports         EmergencyReport[]
+  donations       Donation[]
+  notifications   Notification[]
+  
+  @@index([status])
+  @@index([startDate])
+}
+
+// Emergency Report model for user-submitted emergency situations
+model EmergencyReport {
+  id              String    @id @default(cuid())
+  userId          String
+  disasterId      String?
+  latitude        Float     // GPS latitude
+  longitude       Float     // GPS longitude
+  description     String
+  urgency         String    // low, medium, high, critical
+  status          String    @default("pending") // pending, in-progress, resolved
+  createdAt       DateTime  @default(now())
+  
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  disaster        Disaster? @relation(fields: [disasterId], references: [id], onDelete: SetNull)
+  rescueOps       RescueOperation[]
+  
+  @@index([userId])
+  @@index([disasterId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Donation model for tracking relief contributions
+model Donation {
+  id              String    @id @default(cuid())
+  donorName       String
+  donorContact    String
+  userId          String?
+  disasterId      String?
+  type            String    // food, clothing, medical, other
+  quantity        Int
+  description     String?
+  status          String    @default("pending") // pending, collected, distributed
+  createdAt       DateTime  @default(now())
+  distributedAt   DateTime?
+  
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  disaster        Disaster? @relation(fields: [disasterId], references: [id], onDelete: SetNull)
+  
+  @@index([disasterId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Notification model for disaster alerts and updates
+model Notification {
+  id              String    @id @default(cuid())
+  title           String
+  message         String
+  type            String    // alert, warning, update, info
+  disasterId      String?
+  targetAudience  String    @default("all") // all, affected-area, volunteers, admins
+  createdAt       DateTime  @default(now())
+  sentAt          DateTime?
+  
+  disaster        Disaster? @relation(fields: [disasterId], references: [id], onDelete: SetNull)
+  
+  @@index([disasterId])
+  @@index([createdAt])
+}
+
+// Rescue Operation model for coordinating rescue efforts
+model RescueOperation {
+  id              String    @id @default(cuid())
+  reportId        String
+  assignedTeam    String
+  status          String    @default("assigned") // assigned, in-progress, completed, cancelled
+  priority        String    // low, medium, high, critical
+  notes           String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  
+  report          EmergencyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  @@index([reportId])
+  @@index([status])
+  @@index([priority])
+}
