@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: dms-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dms_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dms_production}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - dms-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dms_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: dms-app-prod
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dms_user}:${POSTGRES_PASSWORD:-change_this_password}@postgres:5432/${POSTGRES_DB:-dms_production}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dms-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: dms-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - app
+    networks:
+      - dms-network
+
+  # PostgreSQL Backup Service
+  backup:
+    image: postgres:15-alpine
+    container_name: dms-backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dms_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dms_production}
+      BACKUP_RETENTION_DAYS: 30
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    depends_on:
+      - postgres
+    networks:
+      - dms-network
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Backup service started"
+        while true; do
+          sleep 86400  # Run daily
+          /backup.sh
+        done
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  dms-network:
+    driver: bridge
